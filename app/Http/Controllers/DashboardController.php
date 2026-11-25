@@ -10,41 +10,29 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
-    /**
-     * Display the restaurant dashboard.
-     *
-     * Business rules:
-     * - No credit sales.
-     * - A completed payment represents one completed sale.
-     * - Only completed payments count towards sales.
-     * - Outstanding balances are not calculated or displayed.
-     */
     public function index(Request $request)
     {
+        $user = $request->user();
+        $isOwner = $user->role === 'owner';
+
         $today = Carbon::today();
         $now = Carbon::now();
 
         /*
-        |--------------------------------------------------------------------------
-        | Today's Sales
-        |--------------------------------------------------------------------------
-        */
-
+         * Cashiers see only their own completed payments.
+         * Owners see all completed payments.
+         */
         $todayPayments = Payment::query()
             ->where('status', 'completed')
-            ->whereBetween('paid_at', [$today, $now]);
+            ->whereBetween('paid_at', [$today, $now])
+            ->when(
+                !$isOwner,
+                fn ($query) => $query->where('received_by', $user->id)
+            );
 
-        $todaySales = (float) (clone $todayPayments)
-            ->sum('amount');
+        $todaySales = (float) (clone $todayPayments)->sum('amount');
 
-        $paymentsToday = (clone $todayPayments)
-            ->count();
-
-        /*
-        |--------------------------------------------------------------------------
-        | Today's Sales By Payment Method
-        |--------------------------------------------------------------------------
-        */
+        $paymentsToday = (clone $todayPayments)->count();
 
         $collectionsByMethod = (clone $todayPayments)
             ->select('method', DB::raw('SUM(amount) as total'))
@@ -52,79 +40,57 @@ class DashboardController extends Controller
             ->pluck('total', 'method');
 
         $cashSales = (float) ($collectionsByMethod['cash'] ?? 0);
-
-        $mobileMoneySales = (float) (
-            $collectionsByMethod['mobile_money'] ?? 0
-        );
-
+        $mobileMoneySales = (float) ($collectionsByMethod['mobile_money'] ?? 0);
         $cardSales = (float) ($collectionsByMethod['card'] ?? 0);
 
         /*
-        |--------------------------------------------------------------------------
-        | Orders Recorded Today
-        |--------------------------------------------------------------------------
-        */
+         * Orders are restricted by cashier_id for non-owners.
+         */
+        $todayOrders = Order::query()
+            ->when(
+                !$isOwner,
+                fn ($query) => $query->where('cashier_id', $user->id)
+            );
 
-        $ordersToday = Order::query()
+        $ordersToday = (clone $todayOrders)
             ->whereBetween('created_at', [$today, $now])
             ->count();
 
-        $cancelledOrdersToday = Order::query()
+        $cancelledOrdersToday = (clone $todayOrders)
             ->whereBetween('created_at', [$today, $now])
             ->where('status', 'cancelled')
             ->count();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Paid Orders Awaiting Service
-        |--------------------------------------------------------------------------
-        */
-
-        $awaitingService = Order::query()
-            ->where('status', 'paid')
+        $awaitingService = (clone $todayOrders)
+            ->where('payment_status', 'paid')
+            ->whereNotIn('status', ['served', 'cancelled'])
             ->count();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Orders Served Today
-        |--------------------------------------------------------------------------
-        */
-
-        $servedToday = Order::query()
+        $servedToday = (clone $todayOrders)
             ->where('status', 'served')
             ->whereBetween('served_at', [$today, $now])
             ->count();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Recent Orders
-        |--------------------------------------------------------------------------
-        */
-
         $recentOrders = Order::query()
-            ->with(['payments'])
+            ->with('payments')
+            ->when(
+                !$isOwner,
+                fn ($query) => $query->where('cashier_id', $user->id)
+            )
             ->latest('created_at')
             ->take(8)
             ->get();
 
-        /*
-        |--------------------------------------------------------------------------
-        | Recent Completed Sales
-        |--------------------------------------------------------------------------
-        */
-
         $recentPayments = Payment::query()
             ->with(['order', 'receivedBy'])
             ->where('status', 'completed')
+            ->when(
+                !$isOwner,
+                fn ($query) => $query->where('received_by', $user->id)
+            )
             ->latest('paid_at')
             ->take(5)
             ->get();
-
-        /*
-        |--------------------------------------------------------------------------
-        | Dashboard View
-        |--------------------------------------------------------------------------
-        */
 
         return view('dashboard', compact(
             'todaySales',

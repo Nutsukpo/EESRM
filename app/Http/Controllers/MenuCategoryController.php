@@ -10,8 +10,22 @@ use Illuminate\Validation\Rule;
 
 class MenuCategoryController extends Controller
 {
+    /**
+     * Restrict menu management to the restaurant owner.
+     */
+    private function requireOwner(): void
+    {
+        abort_unless(
+            auth()->check() && auth()->user()->role === 'owner',
+            403,
+            'Only the owner can manage menu items and categories.'
+        );
+    }
+
+
     public function index(): View
     {
+        $this->requireOwner();
         $categories = MenuCategory::withCount('menuItems')
             ->orderBy('name')
             ->paginate(10);
@@ -21,11 +35,13 @@ class MenuCategoryController extends Controller
 
     public function create(): View
     {
+        $this->requireOwner();
         return view('categories.create');
     }
 
     public function store(Request $request): RedirectResponse
     {
+        $this->requireOwner();
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255', 'unique:menu_categories,name'],
             'description' => ['nullable', 'string', 'max:2000'],
@@ -42,11 +58,13 @@ class MenuCategoryController extends Controller
 
     public function edit(MenuCategory $category): View
     {
+        $this->requireOwner();
         return view('categories.edit', compact('category'));
     }
 
     public function update(Request $request, MenuCategory $category): RedirectResponse
     {
+        $this->requireOwner();
         $validated = $request->validate([
             'name' => [
                 'required',
@@ -66,6 +84,7 @@ class MenuCategoryController extends Controller
 
     public function toggleStatus(MenuCategory $category): RedirectResponse
     {
+        $this->requireOwner();
         $category->update([
             'is_active' => ! $category->is_active,
         ]);

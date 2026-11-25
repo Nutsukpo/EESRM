@@ -14,10 +14,18 @@ class PaymentController extends Controller
 {
     /**
      * Display payment history.
+     * Owners see all payments; cashiers see only payments they received.
      */
     public function index(Request $request)
     {
+        $user = $request->user();
+        $isOwner = $user->role === 'owner';
+
         $payments = Payment::with(['order', 'receivedBy'])
+            ->when(
+                !$isOwner,
+                fn ($query) => $query->where('received_by', $user->id)
+            )
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = trim($request->input('search'));
 
@@ -50,6 +58,8 @@ class PaymentController extends Controller
      */
     public function create(Order $order)
     {
+        $this->authorizeOrderAccess($order);
+
         $order->load('items');
 
         if (in_array($order->status, ['cancelled', 'served'], true)) {
@@ -102,6 +112,9 @@ class PaymentController extends Controller
      */
     public function store(Request $request, Order $order)
     {
+        // Reject unauthorized orders before validating payment input.
+        $this->authorizeOrderAccess($order);
+
         $validated = $request->validate([
             'method' => [
                 'required',
@@ -130,6 +143,9 @@ class PaymentController extends Controller
             $lockedOrder = Order::whereKey($order->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            // Recheck ownership using the locked database record.
+            $this->authorizeOrderAccess($lockedOrder);
 
             if (in_array($lockedOrder->status, ['cancelled', 'served'], true)) {
                 throw ValidationException::withMessages([
@@ -216,8 +232,7 @@ class PaymentController extends Controller
             /*
              * IMPORTANT:
              * Do not set orders.status = 'paid'.
-             * That value is not accepted by your current database column.
-             * Preserve the operational status (for example, pending).
+             * Preserve the operational status.
              * Payment status records whether the order has been paid.
              */
             $lockedOrder->update([
@@ -268,6 +283,8 @@ class PaymentController extends Controller
      */
     public function receipt(Payment $payment)
     {
+        $this->authorizePaymentAccess($payment);
+
         $payment->load([
             'order.items',
             'order.payments',
@@ -287,5 +304,39 @@ class PaymentController extends Controller
             'payment',
             'paidAmount'
         ));
+    }
+
+    /**
+     * Only owners or the cashier who created the order can access it.
+     */
+    private function authorizeOrderAccess(Order $order): void
+    {
+        $user = auth()->user();
+
+        abort_unless(
+            $user && (
+                $user->role === 'owner'
+                || (int) $order->cashier_id === (int) $user->id
+            ),
+            403,
+            'You are not authorized to access payments for this order.'
+        );
+    }
+
+    /**
+     * Only owners or the cashier who received the payment can access it.
+     */
+    private function authorizePaymentAccess(Payment $payment): void
+    {
+        $user = auth()->user();
+
+        abort_unless(
+            $user && (
+                $user->role === 'owner'
+                || (int) $payment->received_by === (int) $user->id
+            ),
+            403,
+            'You are not authorized to access this payment receipt.'
+        );
     }
 }

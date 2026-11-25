@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AuditLog;
 use App\Models\MenuCategory;
 use App\Models\MenuItem;
 use App\Models\Order;
@@ -143,6 +144,31 @@ class PosController extends Controller
                     'subtotal' => ($unitPrice * $quantity) / 100,
                 ]);
             }
+
+            // Record the order creation in the same database transaction.
+            AuditLog::record(
+                'order_created',
+                "Created order {$order->order_number}",
+                $order,
+                null,
+                [
+                    'order_number' => $order->order_number,
+                    'cashier_id' => $order->cashier_id,
+                    'order_type' => $order->order_type,
+                    'payment_status' => $order->payment_status,
+                    'subtotal' => $order->subtotal,
+                    'discount' => $order->discount,
+                    'tax' => $order->tax,
+                    'total' => $order->total,
+                    'items' => $order->items()->get()->map(fn ($item) => [
+                        'menu_item_id' => $item->menu_item_id,
+                        'name' => $item->item_name,
+                        'quantity' => $item->quantity,
+                        'unit_price' => $item->unit_price,
+                        'subtotal' => $item->subtotal,
+                    ])->all(),
+                ]
+            );
 
             return $order;
         }, 3);

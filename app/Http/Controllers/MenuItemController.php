@@ -11,8 +11,22 @@ use Illuminate\View\View;
 
 class MenuItemController extends Controller
 {
+    /**
+     * Restrict menu management to the restaurant owner.
+     */
+    private function requireOwner(): void
+    {
+        abort_unless(
+            auth()->check() && auth()->user()->role === 'owner',
+            403,
+            'Only the owner can manage menu items and categories.'
+        );
+    }
+
+
     public function index(): View
     {
+        $this->requireOwner();
         $items = MenuItem::with('category')
             ->orderBy('name')
             ->paginate(10);
@@ -22,6 +36,7 @@ class MenuItemController extends Controller
 
     public function create(): View
     {
+        $this->requireOwner();
         $categories = MenuCategory::where('is_active', true)
             ->orderBy('name')
             ->get();
@@ -31,6 +46,7 @@ class MenuItemController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        $this->requireOwner();
         $validated = $request->validate([
             'menu_category_id' => [
                 'required',
@@ -54,6 +70,7 @@ class MenuItemController extends Controller
 
     public function edit(MenuItem $menu_item): View
     {
+        $this->requireOwner();
         $categories = MenuCategory::where('is_active', true)
             ->orWhere('id', $menu_item->menu_category_id)
             ->orderBy('name')
@@ -69,6 +86,7 @@ class MenuItemController extends Controller
         Request $request,
         MenuItem $menu_item
     ): RedirectResponse {
+        $this->requireOwner();
         $validated = $request->validate([
             'menu_category_id' => [
                 'required',
@@ -90,6 +108,7 @@ class MenuItemController extends Controller
     public function toggleAvailability(
         MenuItem $menu_item
     ): RedirectResponse {
+        $this->requireOwner();
         $menu_item->update([
             'is_available' => ! $menu_item->is_available,
         ]);

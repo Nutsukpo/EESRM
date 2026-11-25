@@ -18,8 +18,15 @@ class OrderController extends Controller
 {
     public function index(Request $request): View
     {
+        $user = $request->user();
+        $isOwner = $user->role === 'owner';
+
         $orders = Order::query()
             ->with('cashier')
+            ->when(
+                !$isOwner,
+                fn ($query) => $query->where('cashier_id', $user->id)
+            )
             ->when($request->filled('search'), function ($query) use ($request) {
                 $search = trim($request->search);
 
@@ -45,6 +52,8 @@ class OrderController extends Controller
 
     public function show(Order $order): View
     {
+        $this->authorizeOrderAccess($order);
+
         $order->load(['cashier', 'server', 'items.menuItem', 'payments']);
 
         return view('orders.show', compact('order'));
@@ -52,6 +61,8 @@ class OrderController extends Controller
 
     public function edit(Order $order): View|RedirectResponse
     {
+        $this->authorizeOrderAccess($order);
+
         if (!$this->isEditable($order)) {
             return redirect()
                 ->route('orders.show', $order)
@@ -59,6 +70,7 @@ class OrderController extends Controller
         }
 
         $order->load('items');
+
         $categories = MenuCategory::query()
             ->where('is_active', true)
             ->with(['menuItems' => fn ($q) =>
@@ -72,6 +84,9 @@ class OrderController extends Controller
 
     public function update(Request $request, Order $order): RedirectResponse
     {
+        // Check ownership before processing the submitted changes.
+        $this->authorizeOrderAccess($order);
+
         $input = [
             'order_type' => $request->input('order_type'),
             'items' => json_decode($request->input('items_json', ''), true),
@@ -88,6 +103,9 @@ class OrderController extends Controller
             $lockedOrder = Order::query()
                 ->lockForUpdate()
                 ->findOrFail($order->id);
+
+            // Recheck ownership against the locked database record.
+            $this->authorizeOrderAccess($lockedOrder);
 
             if (!$this->isEditable($lockedOrder)) {
                 throw ValidationException::withMessages([
@@ -185,6 +203,24 @@ class OrderController extends Controller
         return redirect()
             ->route('orders.show', $order)
             ->with('status', 'Order updated successfully.');
+    }
+
+    /**
+     * Owners can access every order.
+     * Other users can access only orders assigned to their cashier account.
+     */
+    private function authorizeOrderAccess(Order $order): void
+    {
+        $user = auth()->user();
+
+        abort_unless(
+            $user && (
+                $user->role === 'owner'
+                || (int) $order->cashier_id === (int) $user->id
+            ),
+            403,
+            'You are not authorized to access this order.'
+        );
     }
 
     private function isEditable(Order $order): bool
