@@ -1,0 +1,44 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+/auth.json
+
+# Dependencies
+/vendor/
+/node_modules/
+
+# Laravel generated files
+/public/build/
+/public/hot
+/public/storage
+/storage/*.key
+/storage/logs/*
+/storage/framework/cache/*
+/storage/framework/sessions/*
+/storage/framework/views/*
+/storage/framework/testing/*
+/bootstrap/cache/*.php
+
+# Local databases and backups
+/database/*.sqlite
+/database/*.sqlite-*
+*.sql
+*.sql.gz
+*.bak
+
+# Desktop application build artifacts
+/desktop/node_modules/
+/desktop/dist/
+
+# IDE and operating system files
+.DS_Store
+Thumbs.db
+/.idea/
+/.vscode/
+/.cursor/
+/.zed/
+
+# Logs and temporary files
+*.log
+*.tmp
